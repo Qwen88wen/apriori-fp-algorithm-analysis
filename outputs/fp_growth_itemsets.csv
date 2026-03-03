@@ -1,0 +1,120 @@
+itemset,size,support
+Amphet,1,0.037347
+Gabapentin,1,0.043385
+Other,1,0.068190
+Heroin death certificate (DC),1,0.068748
+Oxycodone,1,0.089558
+Fentanyl Analogue,1,0.090487
+Methadone,1,0.095225
+Xylazine,1,0.100149
+Heroin/Morph/Codeine,1,0.204571
+Benzodiazepine,1,0.249535
+Ethanol,1,0.294500
+Heroin,1,0.300818
+Cocaine,1,0.384708
+Fentanyl,1,0.737737
+Any Opioid,1,0.819770
+Amphet; Any Opioid,2,0.030286
+Fentanyl Analogue; Heroin,2,0.032887
+Fentanyl; Gabapentin,2,0.033631
+Fentanyl; Oxycodone,2,0.034560
+Fentanyl; Other,2,0.035860
+Cocaine; Fentanyl Analogue,2,0.036789
+Benzodiazepine; Methadone,2,0.037904
+Benzodiazepine; Oxycodone,2,0.037997
+Any Opioid; Gabapentin,2,0.041527
+Cocaine; Xylazine,2,0.046172
+Any Opioid; Other,2,0.047194
+Fentanyl; Methadone,2,0.050818
+Ethanol; Heroin/Morph/Codeine,2,0.051561
+Benzodiazepine; Heroin/Morph/Codeine,2,0.052490
+Benzodiazepine; Ethanol,2,0.061594
+Any Opioid; Oxycodone,2,0.062523
+Benzodiazepine; Cocaine,2,0.062709
+Cocaine; Heroin/Morph/Codeine,2,0.064474
+Any Opioid; Heroin death certificate (DC),2,0.068562
+Heroin; Heroin death certificate (DC),2,0.068748
+Heroin death certificate (DC); Heroin/Morph/Codeine,2,0.068748
+Benzodiazepine; Heroin,2,0.076180
+Any Opioid; Fentanyl Analogue,2,0.077573
+Any Opioid; Methadone,2,0.078688
+Ethanol; Heroin,2,0.082869
+Fentanyl; Fentanyl Analogue,2,0.089372
+Fentanyl; Xylazine,2,0.099777
+Any Opioid; Xylazine,2,0.100056
+Cocaine; Ethanol,2,0.106094
+Cocaine; Heroin,2,0.106187
+Fentanyl; Heroin/Morph/Codeine,2,0.131828
+Benzodiazepine; Fentanyl,2,0.148737
+Any Opioid; Benzodiazepine,2,0.182181
+Fentanyl; Heroin,2,0.187663
+Heroin; Heroin/Morph/Codeine,2,0.193515
+Ethanol; Fentanyl,2,0.202062
+Any Opioid; Heroin/Morph/Codeine,2,0.203920
+Any Opioid; Heroin,2,0.217670
+Any Opioid; Ethanol,2,0.223430
+Cocaine; Fentanyl,2,0.308621
+Any Opioid; Cocaine,2,0.317726
+Any Opioid; Fentanyl,2,0.672612
+Benzodiazepine; Ethanol; Fentanyl,3,0.030100
+Any Opioid; Fentanyl; Other,3,0.031401
+Any Opioid; Cocaine; Fentanyl Analogue,3,0.032051
+Benzodiazepine; Fentanyl; Heroin/Morph/Codeine,3,0.032795
+Fentanyl; Fentanyl Analogue; Heroin,3,0.032887
+Any Opioid; Fentanyl; Gabapentin,3,0.033631
+Ethanol; Fentanyl; Heroin/Morph/Codeine,3,0.033724
+Cocaine; Fentanyl; Fentanyl Analogue,3,0.036232
+Any Opioid; Benzodiazepine; Ethanol,3,0.037997
+Cocaine; Fentanyl; Heroin/Morph/Codeine,3,0.045058
+Any Opioid; Cocaine; Xylazine,3,0.046080
+Cocaine; Fentanyl; Xylazine,3,0.046080
+Any Opioid; Fentanyl; Methadone,3,0.046358
+Benzodiazepine; Cocaine; Fentanyl,3,0.047194
+Benzodiazepine; Heroin; Heroin/Morph/Codeine,3,0.047659
+Benzodiazepine; Fentanyl; Heroin,3,0.047752
+Ethanol; Fentanyl; Heroin,3,0.048959
+Ethanol; Heroin; Heroin/Morph/Codeine,3,0.049052
+Any Opioid; Benzodiazepine; Cocaine,3,0.050910
+Any Opioid; Ethanol; Heroin/Morph/Codeine,3,0.051561
+Any Opioid; Benzodiazepine; Heroin/Morph/Codeine,3,0.052397
+Any Opioid; Benzodiazepine; Heroin,3,0.054069
+Any Opioid; Ethanol; Heroin,3,0.056392
+Cocaine; Heroin; Heroin/Morph/Codeine,3,0.063174
+Any Opioid; Cocaine; Heroin/Morph/Codeine,3,0.064381
+Cocaine; Fentanyl; Heroin,3,0.065310
+Any Opioid; Heroin; Heroin death certificate (DC),3,0.068562
+Any Opioid; Heroin death certificate (DC); Heroin/Morph/Codeine,3,0.068562
+Heroin; Heroin death certificate (DC); Heroin/Morph/Codeine,3,0.068748
+Any Opioid; Cocaine; Heroin,3,0.072464
+Any Opioid; Fentanyl; Fentanyl Analogue,3,0.076551
+Cocaine; Ethanol; Fentanyl,3,0.081197
+Any Opioid; Cocaine; Ethanol,3,0.083705
+Any Opioid; Fentanyl; Xylazine,3,0.099777
+Any Opioid; Benzodiazepine; Fentanyl,3,0.128855
+Fentanyl; Heroin; Heroin/Morph/Codeine,3,0.129599
+Any Opioid; Fentanyl; Heroin/Morph/Codeine,3,0.131457
+Any Opioid; Fentanyl; Heroin,3,0.152174
+Any Opioid; Ethanol; Fentanyl,3,0.183482
+Any Opioid; Heroin; Heroin/Morph/Codeine,3,0.193237
+Any Opioid; Cocaine; Fentanyl,3,0.285117
+Any Opioid; Cocaine; Fentanyl; Fentanyl Analogue,4,0.031494
+Benzodiazepine; Fentanyl; Heroin; Heroin/Morph/Codeine,4,0.032051
+Any Opioid; Benzodiazepine; Fentanyl; Heroin/Morph/Codeine,4,0.032702
+Ethanol; Fentanyl; Heroin; Heroin/Morph/Codeine,4,0.033538
+Any Opioid; Ethanol; Fentanyl; Heroin/Morph/Codeine,4,0.033724
+Any Opioid; Benzodiazepine; Fentanyl; Heroin,4,0.037997
+Any Opioid; Ethanol; Fentanyl; Heroin,4,0.040505
+Any Opioid; Benzodiazepine; Cocaine; Fentanyl,4,0.042178
+Cocaine; Fentanyl; Heroin; Heroin/Morph/Codeine,4,0.044593
+Any Opioid; Cocaine; Fentanyl; Heroin/Morph/Codeine,4,0.045058
+Any Opioid; Cocaine; Fentanyl; Xylazine,4,0.046080
+Any Opioid; Benzodiazepine; Heroin; Heroin/Morph/Codeine,4,0.047659
+Any Opioid; Ethanol; Heroin; Heroin/Morph/Codeine,4,0.049052
+Any Opioid; Cocaine; Fentanyl; Heroin,4,0.053419
+Any Opioid; Cocaine; Heroin; Heroin/Morph/Codeine,4,0.063081
+Any Opioid; Heroin; Heroin death certificate (DC); Heroin/Morph/Codeine,4,0.068562
+Any Opioid; Cocaine; Ethanol; Fentanyl,4,0.075158
+Any Opioid; Fentanyl; Heroin; Heroin/Morph/Codeine,4,0.129506
+Any Opioid; Benzodiazepine; Fentanyl; Heroin; Heroin/Morph/Codeine,5,0.032051
+Any Opioid; Ethanol; Fentanyl; Heroin; Heroin/Morph/Codeine,5,0.033538
+Any Opioid; Cocaine; Fentanyl; Heroin; Heroin/Morph/Codeine,5,0.044593
