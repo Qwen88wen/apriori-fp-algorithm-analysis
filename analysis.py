@@ -1,50 +1,41 @@
 #!/usr/bin/env python3
 """
-Association-rule mining workflow with optional LLM-assisted data cleaning/evaluation.
+Association-rule mining for the accidental drug related deaths dataset.
 
-Core mining algorithms (Apriori + FP-Growth) are pure Python and dependency-free.
-When optional tools are available, the script can:
-1) use an open-source LLM backend (e.g., Ollama) to classify ambiguous presence values,
-2) use PandasAI for dataframe-level data quality inspection,
-3) use LLM to evaluate mined rules by support/confidence/lift.
+This script implements BOTH Apriori and FP-Growth from scratch (pure Python,
+no external dependencies) so the workflow is reproducible in restricted
+environments. It also exports frequent itemsets and association rules for each
+algorithm, and writes a concise comparison report.
 """
 
 from __future__ import annotations
 
 import csv
 import itertools
-import json
 import math
 import os
 import time
 import tracemalloc
-import urllib.error
-import urllib.request
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
 
 # -----------------------------
 # Configuration section
 # -----------------------------
+# The input dataset required by the assignment.
 DATASET_PATH = "Accidental_Drug_Related_Deaths.csv"
+
+# Output folder for generated CSV/markdown artifacts.
 OUTPUT_DIR = "outputs"
 
+# Minimum support and confidence thresholds used for both algorithms.
+# Support is interpreted as fraction of total transactions.
 MIN_SUPPORT = 0.03
 MIN_CONFIDENCE = 0.35
 
-# Optional LLM/PandasAI controls (open-source stack target: Ollama + PandasAI)
-ENABLE_LLM_CLEANING = True
-ENABLE_LLM_EVALUATION = True
-ENABLE_PANDASAI_AUDIT = True
-
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-OLLAMA_TIMEOUT_S = int(os.getenv("OLLAMA_TIMEOUT_S", "20"))
-
-ENABLE_MLXTEND_COMPARISON = True
-ENABLE_SEQUENTIAL_MINING = True
-
+# Drug indicator columns in the source dataset. Each row becomes one transaction
+# containing the substances flagged as present.
 DRUG_COLUMNS = [
     "Heroin",
     "Heroin death certificate (DC)",
@@ -71,118 +62,17 @@ DRUG_COLUMNS = [
     "Other",
 ]
 
-# -----------------------------
-# LLM and PandasAI helpers
-# -----------------------------
-def call_ollama(prompt: str) -> Optional[str]:
-    """Call Ollama generate API. Returns text or None when unavailable."""
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.1},
-    }
-    req = urllib.request.Request(
-        OLLAMA_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_S) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            return body.get("response", "").strip() or None
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        return None
-
-
-def pandasai_audit(dataset_path: str) -> str:
-    """Optional PandasAI data-quality audit; returns markdown text."""
-
-    if not ENABLE_PANDASAI_AUDIT:
-        return "PandasAI audit disabled by config."
-
-    try:
-        import pandas as pd  # type: ignore
-        from pandasai import SmartDataframe  # type: ignore
-    except Exception:
-        return "PandasAI audit skipped: pandas/pandasai not installed in runtime."
-
-    try:
-        df = pd.read_csv(dataset_path)
-    except Exception as exc:
-        return f"PandasAI audit skipped: failed to read dataset ({exc})."
-
-    # Newer PandasAI versions use connector objects and may require credentials;
-    # we intentionally keep this lightweight and safe-fallback.
-    try:
-        sdf = SmartDataframe(df)
-        q1 = sdf.chat("Which columns in this dataframe have the highest missing-value ratio?")
-        q2 = sdf.chat(
-            "List data quality risks that may affect association-rule mining and suggest cleaning actions."
-        )
-        return (
-            "PandasAI audit executed successfully.\n\n"
-            f"- Missingness insight: {q1}\n"
-            f"- Cleaning recommendations: {q2}"
-        )
-    except Exception as exc:
-        return f"PandasAI audit unavailable at runtime (likely missing LLM connector/config): {exc}"
-
-
-def llm_classify_presence(raw_value: str, column: str) -> Optional[bool]:
-    """Ask LLM whether a token means present/absent. Returns None if unclear."""
-
-    prompt = f"""
-You are assisting data cleaning for association-rule mining.
-Column: {column}
-Cell value: {raw_value!r}
-Task: classify this value as PRESENT or ABSENT for substance occurrence.
-Respond with exactly one token: PRESENT or ABSENT.
-""".strip()
-    answer = call_ollama(prompt)
-    if not answer:
-        return None
-    token = answer.upper().strip()
-    if "PRESENT" in token:
-        return True
-    if "ABSENT" in token:
-        return False
-    return None
-
-
-def llm_evaluate_rules(rules: List[Tuple[Tuple[str, ...], Tuple[str, ...], float, float, float]], n: int = 10) -> str:
-    """Ask LLM to evaluate top rules by support/confidence/lift."""
-
-    if not ENABLE_LLM_EVALUATION:
-        return "LLM rule evaluation disabled by config."
-    if not rules:
-        return "No rules available for LLM evaluation."
-
-    lines = []
-    for i, (ant, cons, sup, conf, lift) in enumerate(rules[:n], start=1):
-        lines.append(
-            f"{i}. {{{', '.join(ant)}}} -> {{{', '.join(cons)}}} "
-            f"(support={sup:.4f}, confidence={conf:.4f}, lift={lift:.4f})"
-        )
-    prompt = (
-        "You are reviewing association rules for an analytics assignment.\n"
-        "Evaluate the following rules using support, confidence, and lift.\n"
-        "Output 3 sections: (1) Strong rules, (2) Cautions, (3) Practical recommendations.\n\n"
-        + "\n".join(lines)
-    )
-    response = call_ollama(prompt)
-    if not response:
-        return "LLM evaluation skipped: Ollama endpoint/model unavailable."
-    return response
-
 
 # -----------------------------
-# Data-loading helpers
+# Utility and data-loading helpers
 # -----------------------------
 def normalize_presence(value: str) -> bool:
-    """Default (non-LLM) presence normalization."""
+    """Return True when a cell indicates the substance is present.
+
+    The source data uses mostly "Y" flags, with occasional text in "Other"-style
+    fields. We therefore mark values as present whenever they are non-empty and
+    not explicit negative placeholders.
+    """
 
     if value is None:
         return False
@@ -192,90 +82,31 @@ def normalize_presence(value: str) -> bool:
     return True
 
 
-def load_llm_value_map(path: str, columns: Sequence[str]) -> Dict[Tuple[str, str], bool]:
-    """Build a mapping for ambiguous tokens using LLM (called once per unique token)."""
+def load_transactions(path: str, columns: Sequence[str]) -> List[FrozenSet[str]]:
+    """Load CSV rows and convert each row into a transaction itemset.
 
-    value_map: Dict[Tuple[str, str], bool] = {}
-    token_set: Set[Tuple[str, str]] = set()
-
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            for col in columns:
-                raw = row.get(col, "")
-                token = str(raw).strip()
-                if not token:
-                    continue
-                low = token.lower()
-                if low in {"y", "yes", "n", "no", "0", "1", "nan", "none"}:
-                    continue
-                token_set.add((col, token))
-
-    for col, token in sorted(token_set):
-        result = llm_classify_presence(token, col)
-        if result is not None:
-            value_map[(col, token.lower())] = result
-
-    return value_map
-
-
-def normalize_presence_with_llm(value: str, column: str, llm_map: Dict[Tuple[str, str], bool]) -> bool:
-    """Normalize value using deterministic rules + optional LLM map for ambiguous tokens."""
-
-    if value is None:
-        return False
-    text = str(value).strip()
-    low = text.lower()
-
-    if low in {"", "n", "no", "0", "nan", "none"}:
-        return False
-    if low in {"y", "yes", "1", "true"}:
-        return True
-
-    mapped = llm_map.get((column, low))
-    if mapped is not None:
-        return mapped
-
-    # Fallback: non-empty means present (consistent with original pipeline).
-    return True
-
-
-def load_transactions(path: str, columns: Sequence[str]) -> Tuple[List[FrozenSet[str]], str]:
-    """Load CSV and convert each row into a transaction itemset.
-
-    Returns (transactions, cleaning_note).
+    Each item in a transaction is the drug column name where presence is True.
+    Rows with no positive drug indicator are skipped.
     """
 
     transactions: List[FrozenSet[str]] = []
-    llm_note = "LLM cleaning not used."
-    llm_map: Dict[Tuple[str, str], bool] = {}
-
-    if ENABLE_LLM_CLEANING:
-        llm_map = load_llm_value_map(path, columns)
-        llm_note = (
-            f"LLM cleaning enabled. Learned {len(llm_map)} token classifications "
-            f"via Ollama model '{OLLAMA_MODEL}' (if endpoint available)."
-        )
-
     with open(path, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
-        missing = [col for col in columns if col not in (reader.fieldnames or [])]
+        missing = [col for col in columns if col not in reader.fieldnames]
         if missing:
             raise ValueError(f"Missing required drug columns: {missing}")
 
         for row in reader:
-            basket = frozenset(
-                col
-                for col in columns
-                if normalize_presence_with_llm(row.get(col, ""), col, llm_map)
-            )
-            if len(basket) >= 2:
+            basket = frozenset(col for col in columns if normalize_presence(row.get(col, "")))
+            if basket:
                 transactions.append(basket)
 
-    return transactions, llm_note
+    return transactions
 
 
 def support_count(transactions: Sequence[FrozenSet[str]], itemset: FrozenSet[str]) -> int:
+    """Count transactions containing the given itemset."""
+
     return sum(1 for tx in transactions if itemset.issubset(tx))
 
 
@@ -283,6 +114,11 @@ def generate_rules(
     frequent_itemsets: Dict[FrozenSet[str], float],
     min_confidence: float,
 ) -> List[Tuple[Tuple[str, ...], Tuple[str, ...], float, float, float]]:
+    """Generate association rules from frequent itemsets.
+
+    Returns tuples of (antecedent, consequent, support, confidence, lift).
+    """
+
     rules = []
     for itemset, sup in frequent_itemsets.items():
         if len(itemset) < 2:
@@ -302,7 +138,15 @@ def generate_rules(
                     continue
 
                 lift = confidence / cons_sup if cons_sup > 0 else math.inf
-                rules.append((tuple(sorted(antecedent_fs)), tuple(sorted(consequent_fs)), sup, confidence, lift))
+                rules.append(
+                    (
+                        tuple(sorted(antecedent_fs)),
+                        tuple(sorted(consequent_fs)),
+                        sup,
+                        confidence,
+                        lift,
+                    )
+                )
 
     rules.sort(key=lambda x: (x[3], x[4], x[2]), reverse=True)
     return rules
@@ -312,9 +156,12 @@ def generate_rules(
 # Apriori implementation
 # -----------------------------
 def apriori(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dict[FrozenSet[str], float]:
+    """Mine frequent itemsets using the Apriori algorithm."""
+
     n = len(transactions)
     min_count = math.ceil(min_support * n)
 
+    # L1: frequent 1-itemsets
     item_counter: Counter[str] = Counter()
     for tx in transactions:
         item_counter.update(tx)
@@ -323,10 +170,13 @@ def apriori(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dict[
         frozenset([item]) for item, count in item_counter.items() if count >= min_count
     }
 
-    frequent: Dict[FrozenSet[str], float] = {fs: item_counter[next(iter(fs))] / n for fs in current_level}
+    frequent: Dict[FrozenSet[str], float] = {
+        fs: item_counter[next(iter(fs))] / n for fs in current_level
+    }
 
     k = 2
     while current_level:
+        # Candidate generation (self-join of Lk-1)
         prev = sorted(current_level, key=lambda x: tuple(sorted(x)))
         candidates: Set[FrozenSet[str]] = set()
         for i in range(len(prev)):
@@ -334,9 +184,12 @@ def apriori(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dict[
                 union = prev[i] | prev[j]
                 if len(union) != k:
                     continue
+
+                # Apriori pruning: all (k-1)-subsets of candidate must be frequent.
                 if all(frozenset(sub) in current_level for sub in itertools.combinations(union, k - 1)):
                     candidates.add(union)
 
+        # Count candidate supports and keep only frequent candidates.
         next_level: Set[FrozenSet[str]] = set()
         for cand in candidates:
             count = support_count(transactions, cand)
@@ -355,6 +208,8 @@ def apriori(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dict[
 # -----------------------------
 @dataclass
 class FPNode:
+    """Node in an FP-tree."""
+
     item: Optional[str]
     count: int
     parent: Optional["FPNode"]
@@ -370,6 +225,8 @@ class FPNode:
 
 
 class FPTree:
+    """Compact tree structure used by FP-Growth."""
+
     def __init__(self):
         self.root = FPNode(None, None)
         self.header: Dict[str, FPNode] = {}
@@ -380,6 +237,8 @@ class FPTree:
             if item not in node.children:
                 child = FPNode(item, node)
                 node.children[item] = child
+
+                # Maintain linked-list in header table for quick conditional pattern extraction.
                 if item not in self.header:
                     self.header[item] = child
                 else:
@@ -391,11 +250,17 @@ class FPTree:
             node.count += count
 
 
-def build_fp_tree(transactions: Sequence[FrozenSet[str]], min_count: int) -> Tuple[FPTree, Dict[str, int]]:
+def build_fp_tree(
+    transactions: Sequence[FrozenSet[str]],
+    min_count: int,
+) -> Tuple[FPTree, Dict[str, int]]:
+    """Build an FP-tree and return it with global frequent-item counts."""
+
     freq_counter: Counter[str] = Counter()
     for tx in transactions:
         freq_counter.update(tx)
 
+    # Keep only globally frequent items.
     freq_items = {item: cnt for item, cnt in freq_counter.items() if cnt >= min_count}
     tree = FPTree()
 
@@ -403,6 +268,8 @@ def build_fp_tree(transactions: Sequence[FrozenSet[str]], min_count: int) -> Tup
         filtered = [item for item in tx if item in freq_items]
         if not filtered:
             continue
+
+        # Sort by descending support, then lexicographically for deterministic output.
         filtered.sort(key=lambda x: (-freq_items[x], x))
         tree.add_transaction(filtered)
 
@@ -410,6 +277,8 @@ def build_fp_tree(transactions: Sequence[FrozenSet[str]], min_count: int) -> Tup
 
 
 def mine_conditional_pattern_base(node: FPNode) -> List[Tuple[List[str], int]]:
+    """Extract prefix paths ending at linked nodes for one item."""
+
     base: List[Tuple[List[str], int]] = []
     cursor = node
     while cursor is not None:
@@ -424,7 +293,12 @@ def mine_conditional_pattern_base(node: FPNode) -> List[Tuple[List[str], int]]:
     return base
 
 
-def build_conditional_tree(pattern_base: List[Tuple[List[str], int]], min_count: int) -> Tuple[FPTree, Dict[str, int]]:
+def build_conditional_tree(
+    pattern_base: List[Tuple[List[str], int]],
+    min_count: int,
+) -> Tuple[FPTree, Dict[str, int]]:
+    """Create conditional FP-tree from a pattern base."""
+
     counter: Counter[str] = Counter()
     for path, count in pattern_base:
         for item in path:
@@ -444,6 +318,8 @@ def build_conditional_tree(pattern_base: List[Tuple[List[str], int]], min_count:
 
 
 def fp_growth(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dict[FrozenSet[str], float]:
+    """Mine frequent itemsets using FP-Growth recursion."""
+
     n = len(transactions)
     min_count = math.ceil(min_support * n)
     tree, freq_items = build_fp_tree(transactions, min_count)
@@ -451,6 +327,7 @@ def fp_growth(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dic
     frequent: Dict[FrozenSet[str], float] = {}
 
     def recurse(current_tree: FPTree, current_freq: Dict[str, int], suffix: FrozenSet[str]) -> None:
+        # Process items from low frequency to high frequency.
         items = sorted(current_freq.items(), key=lambda kv: (kv[1], kv[0]))
         for item, count in items:
             new_pattern = frozenset(set(suffix) | {item})
@@ -459,6 +336,7 @@ def fp_growth(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dic
             node = current_tree.header.get(item)
             if node is None:
                 continue
+
             pattern_base = mine_conditional_pattern_base(node)
             cond_tree, cond_freq = build_conditional_tree(pattern_base, min_count)
             if cond_freq:
@@ -467,74 +345,6 @@ def fp_growth(transactions: Sequence[FrozenSet[str]], min_support: float) -> Dic
     recurse(tree, freq_items, frozenset())
     return frequent
 
-
-
-def mlxtend_analysis(transactions: Sequence[FrozenSet[str]], min_support: float, min_confidence: float):
-    """Optional mlxtend-based Apriori/FP-Growth comparison."""
-
-    if not ENABLE_MLXTEND_COMPARISON:
-        return None, "mlxtend comparison disabled by config."
-    try:
-        import pandas as pd  # type: ignore
-        from mlxtend.preprocessing import TransactionEncoder  # type: ignore
-        from mlxtend.frequent_patterns import apriori as mx_apriori, fpgrowth as mx_fpgrowth, association_rules  # type: ignore
-    except Exception:
-        return None, "mlxtend comparison skipped: pandas/mlxtend not installed in runtime."
-
-    tx_list = [sorted(list(tx)) for tx in transactions]
-    te = TransactionEncoder()
-    arr = te.fit(tx_list).transform(tx_list)
-    df = pd.DataFrame(arr, columns=te.columns_)
-
-    ap = mx_apriori(df, min_support=min_support, use_colnames=True)
-    fp = mx_fpgrowth(df, min_support=min_support, use_colnames=True)
-    ap_rules = association_rules(ap, metric="confidence", min_threshold=min_confidence)
-    fp_rules = association_rules(fp, metric="confidence", min_threshold=min_confidence)
-
-    result = {
-        "apriori_itemsets": int(len(ap)),
-        "fpgrowth_itemsets": int(len(fp)),
-        "apriori_rules": int(len(ap_rules)),
-        "fpgrowth_rules": int(len(fp_rules)),
-    }
-    return result, "mlxtend comparison executed successfully."
-
-
-def handcrafted_vs_mlxtend_note(
-    handcrafted_ap_cnt: int,
-    handcrafted_fp_cnt: int,
-    handcrafted_ap_rules: int,
-    handcrafted_fp_rules: int,
-    mlxtend_result,
-    mlxtend_note: str,
-) -> str:
-    if not mlxtend_result:
-        return mlxtend_note
-    return (
-        f"{mlxtend_note} "
-        f"Handcrafted(Apriori={handcrafted_ap_cnt}, FP={handcrafted_fp_cnt}, "
-        f"AprioriRules={handcrafted_ap_rules}, FPRules={handcrafted_fp_rules}) vs "
-        f"mlxtend(Apriori={mlxtend_result['apriori_itemsets']}, FP={mlxtend_result['fpgrowth_itemsets']}, "
-        f"AprioriRules={mlxtend_result['apriori_rules']}, FPRules={mlxtend_result['fpgrowth_rules']})."
-    )
-
-
-def sequential_pattern_mining_note(transactions: Sequence[FrozenSet[str]]) -> str:
-    """Optional sequential mining exploration using prefixspan package if available."""
-
-    if not ENABLE_SEQUENTIAL_MINING:
-        return "Sequential mining disabled by config."
-    try:
-        from prefixspan import PrefixSpan  # type: ignore
-    except Exception:
-        return "Sequential mining skipped: prefixspan not installed in runtime."
-
-    seqs = [sorted(list(tx)) for tx in transactions]
-    ps = PrefixSpan(seqs)
-    min_support_count = max(2, int(0.03 * len(seqs)))
-    patterns = ps.frequent(min_support_count)
-    top = patterns[:5]
-    return f"PrefixSpan executed: {len(patterns)} frequent sequential patterns; top5={top}"
 
 # -----------------------------
 # Output helpers
@@ -547,7 +357,7 @@ def write_itemsets_csv(path: str, itemsets: Dict[FrozenSet[str], float]) -> None
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(["itemset", "size", "support"])
-        for fs, sup in sorted(itemsets.items(), key=lambda x: (len(x[0]), x[1], sorted(x[0]))):
+        for fs, sup in sorted(itemsets.items(), key=lambda x: (len(x[0]), x[1], sorted(x[0])), reverse=False):
             writer.writerow(["; ".join(sorted(fs)), len(fs), f"{sup:.6f}"])
 
 
@@ -556,7 +366,13 @@ def write_rules_csv(path: str, rules: List[Tuple[Tuple[str, ...], Tuple[str, ...
         writer = csv.writer(fh)
         writer.writerow(["antecedent", "consequent", "support", "confidence", "lift"])
         for ant, cons, sup, conf, lift in rules:
-            writer.writerow(["; ".join(ant), "; ".join(cons), f"{sup:.6f}", f"{conf:.6f}", f"{lift:.6f}"])
+            writer.writerow([
+                "; ".join(ant),
+                "; ".join(cons),
+                f"{sup:.6f}",
+                f"{conf:.6f}",
+                f"{lift:.6f}",
+            ])
 
 
 def top_n_rules_text(rules: List[Tuple[Tuple[str, ...], Tuple[str, ...], float, float, float]], n: int = 10) -> str:
@@ -580,21 +396,12 @@ def write_summary_report(
     fp_runtime: float,
     apriori_peak_kb: float,
     fp_peak_kb: float,
-    llm_cleaning_note: str,
-    pandasai_note: str,
-    llm_rule_eval: str,
-    mlxtend_compare_note: str,
-    sequential_note: str,
 ) -> None:
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# Apriori vs FP-Growth: Summary of Observations\n\n")
         fh.write(f"- Transactions analyzed: **{n_transactions}**\n")
         fh.write(f"- Minimum support: **{MIN_SUPPORT:.2f}**\n")
         fh.write(f"- Minimum confidence: **{MIN_CONFIDENCE:.2f}**\n\n")
-
-        fh.write("## LLM + PandasAI Data Cleaning/Evaluation Notes\n\n")
-        fh.write(f"- LLM cleaning: {llm_cleaning_note}\n")
-        fh.write(f"- PandasAI audit: {pandasai_note}\n\n")
 
         fh.write("## Frequent Itemsets and Rules\n\n")
         fh.write(f"- Apriori frequent itemsets: **{len(apriori_itemsets)}**\n")
@@ -614,17 +421,27 @@ def write_summary_report(
         fh.write("## Top FP-Growth Rules\n\n")
         fh.write(top_n_rules_text(fp_rules, n=10) + "\n\n")
 
-        fh.write("## LLM-based Rule Evaluation\n\n")
-        fh.write(llm_rule_eval + "\n\n")
+        fh.write("## Recommendations / Conclusions\n\n")
+        fh.write(
+            "1. Both algorithms should return equivalent frequent patterns when support thresholds match. "
+            "If counts differ, check preprocessing or threshold rounding.\n"
+        )
+        fh.write(
+            "2. For larger datasets, FP-Growth is often preferable because it avoids candidate explosion by using "
+            "the FP-tree representation.\n"
+        )
+        fh.write(
+            "3. Apriori remains valuable for teaching and interpretability, especially when candidate generation/pruning "
+            "logic needs to be explicit in documentation.\n"
+        )
 
-        fh.write("## Handcrafted vs mlxtend Comparison\n\n")
-        fh.write(mlxtend_compare_note + "\n\n")
 
-        fh.write("## Sequential Pattern Mining (Self-explore)\n\n")
-        fh.write(sequential_note + "\n")
-
-
+# -----------------------------
+# Main execution pipeline
+# -----------------------------
 def run_with_profile(fn, *args):
+    """Run function while capturing runtime and peak memory in KB."""
+
     tracemalloc.start()
     start = time.perf_counter()
     result = fn(*args)
@@ -637,36 +454,24 @@ def run_with_profile(fn, *args):
 def main() -> None:
     ensure_output_dir()
 
-    transactions, llm_cleaning_note = load_transactions(DATASET_PATH, DRUG_COLUMNS)
+    transactions = load_transactions(DATASET_PATH, DRUG_COLUMNS)
     if not transactions:
         raise RuntimeError("No transactions were extracted from the dataset.")
-
-    pandasai_note = pandasai_audit(DATASET_PATH)
 
     apriori_itemsets, apriori_runtime, apriori_peak_kb = run_with_profile(apriori, transactions, MIN_SUPPORT)
     fp_itemsets, fp_runtime, fp_peak_kb = run_with_profile(fp_growth, transactions, MIN_SUPPORT)
 
+    # Generate rules from each frequent-itemset dictionary.
     apriori_rules = generate_rules(apriori_itemsets, MIN_CONFIDENCE)
     fp_rules = generate_rules(fp_itemsets, MIN_CONFIDENCE)
 
-    llm_rule_eval = llm_evaluate_rules(apriori_rules, n=10)
-
-    mlxtend_result, mlxtend_note = mlxtend_analysis(transactions, MIN_SUPPORT, MIN_CONFIDENCE)
-    mlxtend_compare_note = handcrafted_vs_mlxtend_note(
-        len(apriori_itemsets),
-        len(fp_itemsets),
-        len(apriori_rules),
-        len(fp_rules),
-        mlxtend_result,
-        mlxtend_note,
-    )
-    sequential_note = sequential_pattern_mining_note(transactions)
-
+    # Export detailed machine-readable outputs.
     write_itemsets_csv(os.path.join(OUTPUT_DIR, "apriori_itemsets.csv"), apriori_itemsets)
     write_itemsets_csv(os.path.join(OUTPUT_DIR, "fp_growth_itemsets.csv"), fp_itemsets)
     write_rules_csv(os.path.join(OUTPUT_DIR, "apriori_rules.csv"), apriori_rules)
     write_rules_csv(os.path.join(OUTPUT_DIR, "fp_growth_rules.csv"), fp_rules)
 
+    # Export concise narrative report for assignment summary section.
     write_summary_report(
         path=os.path.join(OUTPUT_DIR, "summary_observations.md"),
         n_transactions=len(transactions),
@@ -678,21 +483,13 @@ def main() -> None:
         fp_runtime=fp_runtime,
         apriori_peak_kb=apriori_peak_kb,
         fp_peak_kb=fp_peak_kb,
-        llm_cleaning_note=llm_cleaning_note,
-        pandasai_note=pandasai_note,
-        llm_rule_eval=llm_rule_eval,
-        mlxtend_compare_note=mlxtend_compare_note,
-        sequential_note=sequential_note,
     )
 
+    # Console summary to quickly validate execution.
     print("Association analysis complete.")
     print(f"Transactions: {len(transactions)}")
     print(f"Apriori -> itemsets: {len(apriori_itemsets)}, rules: {len(apriori_rules)}, runtime: {apriori_runtime:.4f}s")
     print(f"FP-Growth -> itemsets: {len(fp_itemsets)}, rules: {len(fp_rules)}, runtime: {fp_runtime:.4f}s")
-    print(f"LLM cleaning note: {llm_cleaning_note}")
-    print(f"PandasAI note: {pandasai_note}")
-    print(f"mlxtend note: {mlxtend_compare_note}")
-    print(f"Sequential note: {sequential_note}")
     print(f"Outputs written to: {OUTPUT_DIR}/")
 
 
